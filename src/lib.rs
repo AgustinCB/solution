@@ -11,7 +11,7 @@ use transaction::{RawTransaction, Transaction, TransactionStatus};
 mod transaction;
 mod client_status;
 
-pub fn execute_transactions<R: Read>(reader: R, threads: usize) -> Result<Vec<ClientStatus>, Vec<Box<dyn Error + Send>>> {
+pub fn execute_transactions<R: Read>(reader: R, threads: usize) -> (Vec<ClientStatus>, Vec<Box<dyn Error + Send>>) {
     let pool = ThreadPool::new(threads);
     let result = Arc::new(Mutex::new(vec![]));
     let errors: Arc<Mutex<Vec<Box<dyn Error + Send>>>> = Arc::new(Mutex::new(vec![]));
@@ -19,11 +19,10 @@ pub fn execute_transactions<R: Read>(reader: R, threads: usize) -> Result<Vec<Cl
     process_transactions(reader, &pool, &result, &errors);
     pool.join();
 
-    if errors.lock().unwrap().is_empty() {
-        Ok(Arc::try_unwrap(result).unwrap().into_inner().unwrap())
-    } else {
-        Err(Arc::try_unwrap(errors).unwrap().into_inner().unwrap())
-    }
+    (
+        Arc::try_unwrap(result).unwrap().into_inner().unwrap(),
+        Arc::try_unwrap(errors).unwrap().into_inner().unwrap()
+    )
 }
 
 fn process_transactions<R: Read>(
@@ -75,31 +74,42 @@ fn process_transactions<R: Read>(
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use crate::{ClientStatus, execute_transactions};
+    use crate::client_status::ClientStatusError;
+    use crate::transaction::TransactionParseError;
 
     #[test]
     fn test_process_transactions() {
-        let s = "type, client,tx,amount\ndeposit, 1,1,1.0\ndeposit,2,2,2.0\ndeposit,1,3,2.0\nwithdrawal,1,4,1.5\nwithdrawal,2,5,3.0";
-        let mut result = execute_transactions(s.as_bytes(), 1).unwrap();
-        result.sort_by(|a, b| a.id.cmp(&b.id));
-        assert_eq!(
-            result,
+        test_result(
+            "type, client,tx,amount\ndeposit, 1,1,1.0\ndeposit,2,2,2.0\ndeposit,1,3,2.0\nwithdrawal,1,4,1.5\nwithdrawal,2,5,3.0",
             vec![
-                ClientStatus {
-                    id: 1,
-                    available: 1.5f32,
-                    held: 0f32,
-                    total: 1.5f32,
-                    locked: false,
-                },
-                ClientStatus {
-                    id: 2,
-                    available: 2f32,
-                    held: 0f32,
-                    total: 2f32,
-                    locked: false,
-                },
+                ClientStatus { id: 1, available: 1.5, held: 0.0, total: 1.5, locked: false },
+                ClientStatus { id: 2, available: 2.0, held: 0.0, total: 2.0, locked: false }
             ],
+            vec![Box::new(ClientStatusError::InsufficientFounds(3f32, 5, 2f32))]
         );
+    }
+
+    #[test]
+    fn test_process_transaction_with_wrong_transaction_types() {
+        test_result(
+            "type, client,tx,amount\ndeposit, 1,1,1.0\ndeposit,2,2,2.0\ndeposit,1,3,2.0\nwithdrawal,1,4,1.5\nwithdrawal42,2,5,3.0",
+            vec![
+                ClientStatus { id: 1, available: 1.5, held: 0.0, total: 1.5, locked: false },
+                ClientStatus { id: 2, available: 2.0, held: 0.0, total: 2.0, locked: false }
+            ],
+            vec![Box::new(TransactionParseError::InvalidTransactionType("withdrawal42".to_string()))]
+        );
+    }
+
+    fn test_result(transactions: &str, expected_results: Vec<ClientStatus>, expected_errors: Vec<Box<dyn Error + Send>>) {
+        let (mut result, errors) = execute_transactions(transactions.as_bytes(), 1);
+        result.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(expected_results, result);
+        assert_eq!(expected_errors.len(), errors.len());
+        for (e1, e2) in expected_errors.iter().zip(&errors) {
+            assert_eq!(e1.to_string(), e2.to_string())
+        }
     }
 }

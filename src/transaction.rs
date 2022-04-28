@@ -52,6 +52,12 @@ pub enum TransactionParseError {
     InvalidTransactionType(String),
 }
 
+const PRECISION: f32 = 10000f32;
+
+pub fn round(n: f32) -> f32 {
+    (n * PRECISION).round() / (PRECISION)
+}
+
 impl TryInto<Transaction> for RawTransaction {
     type Error = TransactionParseError;
 
@@ -60,12 +66,12 @@ impl TryInto<Transaction> for RawTransaction {
             "deposit" => Ok(Transaction::Deposit {
                 client: self.client,
                 tx: self.tx,
-                amount: self.amount,
+                amount: round(self.amount),
             }),
             "withdrawal" => Ok(Transaction::Withdrawal {
                 client: self.client,
                 tx: self.tx,
-                amount: self.amount,
+                amount: round(self.amount),
             }),
             "dispute" => Ok(Transaction::Dispute {
                 client: self.client,
@@ -86,8 +92,10 @@ impl TryInto<Transaction> for RawTransaction {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TransactionStatus {
-    Complete,
-    Failed,
+    Withdrew,
+    Deposited,
+    FailedDeposit,
+    FailedWithdrawal,
     OnDispute,
     Resolved,
     Chargeback,

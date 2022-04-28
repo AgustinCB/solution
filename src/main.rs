@@ -1,6 +1,5 @@
 use std::env::args;
 use std::fs::File;
-use std::process::exit;
 use csv::WriterBuilder;
 use solution::execute_transactions;
 
@@ -12,16 +11,10 @@ fn main() {
         None => panic!("{}", USAGE)
     };
     let file = File::open(file_path).unwrap();
-    let result = match execute_transactions(&file, num_cpus::get()) {
-        Ok(r) => r,
-        Err(errors) => {
-            eprintln!(
-                "{}",
-                errors.into_iter().map(|e| e.to_string()).collect::<Vec<String>>().join("\n")
-            );
-            exit(1);
-        }
-    };
+    let (result, errors) = execute_transactions(&file, num_cpus::get());
+    for e in errors {
+        eprintln!("{}", e.to_string());
+    }
     let mut wtr = WriterBuilder::new().has_headers(true).from_writer(vec![]);
     wtr.write_record(&["client","available","held","total","locked"]).unwrap();
     for client in result {
